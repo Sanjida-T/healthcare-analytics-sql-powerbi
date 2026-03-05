@@ -1,0 +1,117 @@
+Data Cleaning (MySQL)
+1. Handle missing patient ages
+UPDATE patients
+SET age =
+(
+  SELECT ROUND(AVG(age))
+  FROM patients
+  WHERE age IS NOT NULL
+)
+WHERE age IS NULL;
+
+2. Standardize visit status
+UPDATE visits
+SET visit_status = TRIM(visit_status);
+
+3. Replace NULL treatment cost with 0 for non-completed visits
+UPDATE visits
+SET treatment_cost = 0
+WHERE treatment_cost IS NULL;
+otal visits & revenue by hospital (JOIN + GROUP BY)
+SELECT
+  h.hospital_name,
+  COUNT(v.visit_id) AS total_visits,
+  ROUND(SUM(v.treatment_cost),2) AS total_revenue
+FROM visits v
+JOIN doctors d ON v.doctor_id = d.doctor_id
+JOIN hospitals h ON d.hospital_id = h.hospital_id
+GROUP BY h.hospital_name
+ORDER BY total_revenue DESC;
+
+2. Department performance
+SELECT
+  d.department,
+  COUNT(*) AS visits,
+  ROUND(AVG(v.treatment_cost),2) AS avg_cost
+FROM visits v
+JOIN doctors d ON v.doctor_id = d.doctor_id
+WHERE v.visit_status='Completed'
+GROUP BY d.department
+ORDER BY avg_cost DESC;
+
+3. Doctor productivity leaderboard
+SELECT
+  d.doctor_name,
+  COUNT(v.visit_id) AS completed_visits,
+  ROUND(SUM(v.treatment_cost),2) AS revenue_generated
+FROM visits v
+JOIN doctors d ON v.doctor_id=d.doctor_id
+WHERE v.visit_status='Completed'
+GROUP BY d.doctor_name
+ORDER BY revenue_generated DESC
+LIMIT 10;
+
+4. Monthly revenue trend
+SELECT
+  DATE_FORMAT(visit_date,'%Y-%m') AS month,
+  ROUND(SUM(treatment_cost),2) AS revenue
+FROM visits
+WHERE visit_status='Completed'
+GROUP BY month
+ORDER BY month;
+
+5. Rank hospitals by revenue
+WITH hospital_rev AS (
+SELECT
+  h.hospital_name,
+  SUM(v.treatment_cost) AS revenue
+FROM visits v
+JOIN doctors d ON v.doctor_id=d.doctor_id
+JOIN hospitals h ON d.hospital_id=h.hospital_id
+WHERE v.visit_status='Completed'
+GROUP BY h.hospital_name
+)
+
+SELECT *,
+RANK() OVER(ORDER BY revenue DESC) AS revenue_rank
+FROM hospital_rev;
+
+6. Doctor revenue share inside each hospital
+WITH doc_rev AS (
+SELECT
+  h.hospital_name,
+  d.doctor_name,
+  SUM(v.treatment_cost) AS doc_revenue
+FROM visits v
+JOIN doctors d ON v.doctor_id=d.doctor_id
+JOIN hospitals h ON d.hospital_id=h.hospital_id
+WHERE v.visit_status='Completed'
+GROUP BY h.hospital_name,d.doctor_name
+)
+
+SELECT *,
+ROUND(doc_revenue /
+SUM(doc_revenue) OVER(PARTITION BY hospital_name)*100,2)
+AS pct_of_hospital
+FROM doc_rev
+ORDER BY hospital_name, doc_revenue DESC;
+
+7. 3-month moving average revenue
+WITH monthly AS (
+SELECT
+  DATE_FORMAT(visit_date,'%Y-%m') AS month,
+  SUM(treatment_cost) AS revenue
+FROM visits
+WHERE visit_status='Completed'
+GROUP BY month
+)
+
+SELECT
+  month,
+  revenue,
+  ROUND(AVG(revenue) OVER(
+    ORDER BY month
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+  ),2) AS moving_avg_3m
+FROM monthly;
+
